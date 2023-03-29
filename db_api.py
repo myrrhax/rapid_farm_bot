@@ -37,20 +37,33 @@ class Database:
         sql = """
         CREATE TABLE IF NOT EXISTS scripts (
         id serial PRIMARY KEY,
-        name VARCHAR NOT NULL,
-        intervals_json VARCHAR NOT NULL
+        name VARCHAR NOT NULL UNIQUE,
+        intervals_json VARCHAR NOT NULL,
+        isCurrent BOOLEAN NOT NULL DEFAULT FALSE
         );
         """
         return await self.execute(sql, execute=True)
-    
+
+    async def set_current(self, new_current: dict):
+        old_current = await self.select_script(isCurrent=True)
+        if old_current:
+            await self.update_script(int(old_current.get('id')), old_current.get('intervals_json'), False)
+        await self.update_script(int(new_current.get('id')), new_current.get('intervals_json'), True)
+
     async def add_script(self, name: str, intervals_json: str):
-        sql = "INSERT INTO scripts (name, intervals_json) VALUES($1, $2) returning *"
+        if await self.select_scripts() is None:
+            sql = "INSERT INTO scripts (name, intervals_json, isCurrent) VALUES($1, $2, TRUE) returning *"
+        else:
+            sql = "INSERT INTO scripts (name, intervals_json, isCurrent) VALUES($1, $2, FALSE) returning *"
         return await self.execute(sql, name, intervals_json, execute=True)
     
     async def select_script(self, **kwargs):
         sql = "SELECT * FROM scripts WHERE "
         sql, parameters = self.format_args(sql, parameters=kwargs)
-        return dict(await self.execute(sql, *parameters, fetchrow=True))
+        try:
+            return dict(await self.execute(sql, *parameters, fetchrow=True))
+        except Exception:
+            return None
     
     async def search_script(self, name):
         sql = f"SELECT * FROM scripts WHERE name ILIKE {name}"
@@ -65,9 +78,9 @@ class Database:
         sql, parameters = self.format_args(sql, parameters=kwargs)
         return await self.execute(sql, *parameters, execute=True)
     
-    async def update_script(self, id: int, intervals_json: str):
-        sql = "UPDATE scripts SET intervals_json=$1 WHERE id=$2 RETURNING *"
-        return await self.execute(sql, intervals_json, id, execute=True)
+    async def update_script(self, id: int, intervals_json: str, is_current: bool = False):
+        sql = "UPDATE scripts SET intervals_json=$1, isCurrent=$2 WHERE id=$3 RETURNING *"
+        return await self.execute(sql, intervals_json, is_current, id, execute=True)
 
     async def execute(self, command, *args,
                       fetch: bool = False,

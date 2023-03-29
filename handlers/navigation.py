@@ -1,18 +1,22 @@
 import json
 from aiogram import Dispatcher
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
-from keyboards.menu_keyboards import make_callback_data, levels, get_zero_level_kb, navigation_cd, get_scripts_kb, script_kb, interval_info_kb, interval_cd
+from keyboards.menu_keyboards import make_callback_data, levels, get_zero_level_kb, navigation_cd, get_scripts_kb, script_kb, interval_info_kb, interval_cd,get_safe_mode_kb
 from db_api import db 
 from aiogram.utils.deep_linking import get_start_link
 from config_loader import config
 from aiogram.dispatcher import FSMContext
 from states.dialog_state import DialogState
-import websockets
+from ws_api import WebSocketServer
+
+async def ignore(call: CallbackQuery):
+    await call.answer()
 
 async def back_to_start(call: CallbackQuery, **kwargs):
     is_admin = call.from_user.id in [i.get('telegram_id') for i in await db.select_users()]
     await call.message.edit_text(f'Здравствуйте, {call.from_user.get_mention(as_html=True)}. Вот, что я умею: ', 
                                                   reply_markup=get_zero_level_kb(is_admin))
+
 
 async def help(call: CallbackQuery, **kwargs):
     await call.message.edit_text("Данный бот разработан студентами ИОТ ШКОЛА ИКС",
@@ -41,19 +45,21 @@ async def scripts(call: CallbackQuery, **kwargs):
     await call.message.edit_text(text='Сценарии позволяют более гибко настроить вашу ферму',
                                  reply_markup=await get_scripts_kb())
 
+
 async def add_script(call: CallbackQuery, state: FSMContext, **kwargs):
     await call.message.edit_text("Введите название нового сценария: ")
     await state.set_state(DialogState.enter_name)
 
+
 async def enter_name(message: Message, state: FSMContext):
     name = message.text
-    await state.finish()
     try:
         await db.add_script(name, json.dumps([]))
         await message.answer(text='Сценарии позволяют более гибко настроить вашу ферму',
                                             reply_markup=await get_scripts_kb())
+        await state.finish()
     except Exception as e:
-        await message.answer(e)
+        await message.answer("Сценарий с таким именем уже существует, введите уникальное имя")
 
 async def script_info(call: CallbackQuery, script_id: int, **kwargs):
     script = await db.select_script(id=int(script_id))
@@ -69,6 +75,7 @@ async def interval_info(call: CallbackQuery, script_id: int, interval_id: int, *
     await call.message.edit_text("Информация об интервале", 
                                  reply_markup=await interval_info_kb(script_id, interval_id))
 
+
 async def add_interval(call: CallbackQuery, script_id: int, **kwargs):
     script = await db.select_script(id=script_id)
     intervals: list[dict] = json.loads(script.get('intervals_json'))
@@ -79,6 +86,7 @@ async def add_interval(call: CallbackQuery, script_id: int, **kwargs):
     await call.message.edit_text(text=f'Информация о сценарии {script.get("name")}',
                                  reply_markup=await script_kb(script=await db.select_script(id=script_id)))
 
+
 async def delete_interval(call: CallbackQuery, script_id: int, interval_id: int, **kwargs):
     script = await db.select_script(id=script_id)
     intervals: list[dict] = json.loads(script.get('intervals_json'))
@@ -87,21 +95,22 @@ async def delete_interval(call: CallbackQuery, script_id: int, interval_id: int,
     await call.message.edit_text(text=f'Информация о сценарии {script.get("name")}',
                                  reply_markup=await script_kb(script=await db.select_script(id=script_id)))
 
+
 async def on_interval_changes(call: CallbackQuery, callback_data: dict):
     script = await db.select_script(id=int(callback_data.get('script_id')))
     if script is None:
         await call.message.edit_text(text='Сценарии позволяют более гибко настроить вашу ферму',
                                  reply_markup=await get_scripts_kb())
         return
-    intervals:list = json.loads(script.get('intervals_json'))
-    interval:dict = intervals[int(callback_data.get('interval_id'))]
+    intervals: list = json.loads(script.get('intervals_json'))
+    interval: dict = intervals[int(callback_data.get('interval_id'))]
 
     min_wet = int(callback_data.get('min_wet'))
     max_wet = int(callback_data.get('max_wet'))
     light = int(callback_data.get('light'))
     w_interval = int(callback_data.get('w_interval'))
     days = int(callback_data.get('days'))
-
+    is_current = callback_data.get('is_current') != "False"
 
     interval.update(
         {
@@ -111,21 +120,63 @@ async def on_interval_changes(call: CallbackQuery, callback_data: dict):
             'w_interval': w_interval if w_interval > 12 else int(interval.get('w_interval')),
             'days': days if days > 0 else interval.get('days')
         })
-    await db.update_script(id=int(script.get('id')), intervals_json=json.dumps(intervals))
+    await db.update_script(id=int(script.get('id')), intervals_json=json.dumps(intervals), is_current=is_current)
+    if script.get('iscurrent'):
+        wss: WebSocketServer = call.bot.get('wss')
+        await wss.send_script(script)
     try:
         await call.message.edit_reply_markup(reply_markup=await interval_info_kb(script_id=int(script.get('id')), interval_id=callback_data.get('interval_id')))
     except Exception as e:
         await call.answer()
 
+async def update_current(call: CallbackQuery, script_id: int, **kwargs):
+    script = await db.select_script(id=script_id)
+    await db.set_current(script)
+    await call.answer(f"Был установлен сценарий {script.get('name')}", show_alert=True)
+    wss: WebSocketServer = call.bot.get('wss')
+    await wss.send_script(script)
+    await call.message.edit_reply_markup(await get_scripts_kb())
+
 async def state_check(call: CallbackQuery, **kwargs):
-    connection = websockets.connect(uri='wss://socketsbay.com/wss/v2/1/demo/')
+    wss: WebSocketServer = call.bot.get('wss')
+    state = wss.get_current_state()
+    await call.message.edit_text(f"Текущее состояние: {state}", reply_markup=InlineKeyboardMarkup(
+                                    inline_keyboard=[
+                                        [
+                                            InlineKeyboardButton(text='Назад', callback_data=make_callback_data(levels['start']))
+                                        ]
+                                    ]
+                                 ))
+
+async def safe_mode(call: CallbackQuery, **kwargs):
+    wss: WebSocketServer = call.bot.get('wss')
+    await call.message.edit_text(
+        f"Безопасный режим позволяет .........",
+        reply_markup=await get_safe_mode_kb(wss.safe_mode))
+
+
+async def activate(call: CallbackQuery):
+    wss: WebSocketServer = call.bot.get('wss')
+    wss.safe_mode = True
+    await wss.send_script(wss.safe_mode)
+    await call.answer('Безопасный режим установлен.', show_alert=True)
+    await call.message.edit_reply_markup(await get_safe_mode_kb(wss.safe_mode))
+
+
+async def deactivate(call: CallbackQuery):
+    wss: WebSocketServer = call.bot.get('wss')
+    wss.safe_mode = False
+    await wss.send_script(wss.safe_mode)
+    await call.answer('Безопасный режим выключен.', show_alert=True)
+    await call.message.edit_reply_markup(await get_safe_mode_kb(wss.safe_mode))
+
 
 async def navigate(call: CallbackQuery, state: FSMContext, callback_data: dict):
     level = int(callback_data.get('level'))
     script_id = callback_data.get('script_id')
     interval_id = callback_data.get('interval_id')
 
-    levels_nav =  {
+    levels_nav = {
         0: back_to_start,
         1: help,
         2: state_check,
@@ -136,7 +187,9 @@ async def navigate(call: CallbackQuery, state: FSMContext, callback_data: dict):
         7: delete_script,
         8: add_script,
         9: delete_interval,
-        10: add_interval
+        10: add_interval,
+        11: safe_mode,
+        12: update_current
     }
 
     callback = levels_nav.get(level)
@@ -147,3 +200,6 @@ def register_menu(dp: Dispatcher):
     dp.register_callback_query_handler(navigate, navigation_cd.filter())
     dp.register_message_handler(enter_name, state=DialogState.enter_name)
     dp.register_callback_query_handler(on_interval_changes, interval_cd.filter())
+    dp.register_callback_query_handler(ignore, text='IGNORE')
+    dp.register_callback_query_handler(activate, text='activate')
+    dp.register_callback_query_handler(deactivate, text='deactivate')

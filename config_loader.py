@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     host: SecretStr
     postgres_password: SecretStr
     socket_uri: SecretStr
+    server_host: SecretStr
 
     class Config:
         env_file: str = ".env"
