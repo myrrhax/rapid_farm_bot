@@ -32,13 +32,9 @@ def make_interval_data(script_id:int, interval_id:int, min_wet: int, max_wet: in
                            is_current=is_current)
 
 def get_zero_level_kb(is_admin: bool) -> InlineKeyboardMarkup:
-    kb = [
-        [
-            InlineKeyboardButton("Состояние", callback_data=make_callback_data(levels['state'])),
-        ],
-    ]
+    kb = []
     if (is_admin):
-        kb[0].append(InlineKeyboardButton('Сценарии', callback_data=make_callback_data(levels['scripts'])))
+        kb.append([InlineKeyboardButton('Сценарии', callback_data=make_callback_data(levels['scripts']))])
         kb.append([InlineKeyboardButton('Администрирование', callback_data=make_callback_data(levels['admin']))])
         kb.append([InlineKeyboardButton('Безопасный режим', callback_data=make_callback_data(levels['safe_mode']))])
 
@@ -139,9 +135,9 @@ async def interval_info_kb(script_id: int, interval_id: int) -> InlineKeyboardMa
             InlineKeyboardButton('Свет', callback_data='ignore'),
         ],
         [
-            InlineKeyboardButton('+', callback_data=make_interval_data(script_id=script_id, interval_id=interval_id,min_wet=min_wet, max_wet=max_wet, light=light+1000, w_interval=w_interval, days=days, is_current=script.get('iscurrent'))),
+            InlineKeyboardButton('+', callback_data=make_interval_data(script_id=script_id, interval_id=interval_id,min_wet=min_wet, max_wet=max_wet, light=light+500, w_interval=w_interval, days=days, is_current=script.get('iscurrent'))),
             InlineKeyboardButton(int(interval.get('light')), callback_data='ignore'),
-            InlineKeyboardButton('-', callback_data=make_interval_data(script_id=script_id, interval_id=interval_id,min_wet=min_wet, max_wet=max_wet, light=light-1000, w_interval=w_interval, days=days, is_current=script.get('iscurrent')))
+            InlineKeyboardButton('-', callback_data=make_interval_data(script_id=script_id, interval_id=interval_id,min_wet=min_wet, max_wet=max_wet, light=light-500, w_interval=w_interval, days=days, is_current=script.get('iscurrent')))
         ],
         [
             InlineKeyboardButton('Интервал полива(часы)', callback_data='ignore'),

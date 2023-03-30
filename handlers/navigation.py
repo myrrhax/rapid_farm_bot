@@ -114,9 +114,9 @@ async def on_interval_changes(call: CallbackQuery, callback_data: dict):
 
     interval.update(
         {
-            'min_wet': min_wet if (min_wet >= 20 and min_wet <= 60) and (min_wet != max_wet) else int(interval.get('min_wet')),
-            'max_wet': max_wet if (max_wet >= 60 and max_wet <= 80) and (max_wet != min_wet) else int(interval.get('max_wet')),
-            'light': light if light >= 1000 and light <= 5000 else int(interval.get('light')),
+            'min_wet': min_wet if (min_wet >= 30 and min_wet <= 50) and (min_wet != max_wet) else int(interval.get('min_wet')),
+            'max_wet': max_wet if (max_wet >= 60 and max_wet <= 90) and (max_wet != min_wet) else int(interval.get('max_wet')),
+            'light': light if light >= 2500 and light <= 5000 else int(interval.get('light')),
             'w_interval': w_interval if w_interval > 12 else int(interval.get('w_interval')),
             'days': days if days > 0 else interval.get('days')
         })
@@ -137,21 +137,10 @@ async def update_current(call: CallbackQuery, script_id: int, **kwargs):
     await wss.send_script(script)
     await call.message.edit_reply_markup(await get_scripts_kb())
 
-async def state_check(call: CallbackQuery, **kwargs):
-    wss: WebSocketServer = call.bot.get('wss')
-    state = wss.get_current_state()
-    await call.message.edit_text(f"Текущее состояние: {state}", reply_markup=InlineKeyboardMarkup(
-                                    inline_keyboard=[
-                                        [
-                                            InlineKeyboardButton(text='Назад', callback_data=make_callback_data(levels['start']))
-                                        ]
-                                    ]
-                                 ))
-
 async def safe_mode(call: CallbackQuery, **kwargs):
     wss: WebSocketServer = call.bot.get('wss')
     await call.message.edit_text(
-        f"Безопасный режим позволяет .........",
+        f"Безопасный режим понижает яркость ламп в теплице.",
         reply_markup=await get_safe_mode_kb(wss.safe_mode))
 
 
@@ -179,7 +168,6 @@ async def navigate(call: CallbackQuery, state: FSMContext, callback_data: dict):
     levels_nav = {
         0: back_to_start,
         1: help,
-        2: state_check,
         3: admin,
         4: scripts,
         5: script_info,
